@@ -1,0 +1,6 @@
+{
+  "name": "赛道雷达",
+  "description": "聚合 AI、机器人、半导体三大硬科技赛道的今日最新动态，3分钟看清投资风向。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
