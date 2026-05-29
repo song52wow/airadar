@@ -58,7 +58,7 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
-                  <span>30条已接入事件 </span>
+                  <span>实时快讯流 </span>
                   <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block animate-ping ml-0.5" />
                   <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block -ml-2" />
                 </div>

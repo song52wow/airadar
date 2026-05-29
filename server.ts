@@ -3,13 +3,57 @@ import path from "path";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
 import { INITIAL_NEWS } from "./src/data";
+import { startPolling, getCachedNews, forceRefresh } from "./server/newsCache";
+import { getAIClient } from "./server/ai/client";
 
 dotenv.config();
 
+// Start RSSHub news polling
+startPolling();
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const REPORT_SCHEMA = {
+  type: "object",
+  properties: {
+    sentimentIndex: {
+      type: "integer",
+      description: "Market sentiment rating from 0 to 100",
+    },
+    marketVibe: {
+      type: "string",
+      description: "A succinct caption summarizing today's tech market atmosphere (15 chars max)",
+    },
+    keyTakeaways: {
+      type: "array",
+      items: { type: "string" },
+      description: "Three profound macroeconomic takeaways (30-50 chars each)",
+    },
+    trackAnalysis: {
+      type: "object",
+      properties: {
+        ai: { type: "string" },
+        robot: { type: "string" },
+        semiconductor: { type: "string" },
+      },
+      required: ["ai", "robot", "semiconductor"],
+    },
+    hotCompanies: {
+      type: "array",
+      items: { type: "string" },
+      description: "List of 4 hot companies/stock codes",
+    },
+  },
+  required: [
+    "sentimentIndex",
+    "marketVibe",
+    "keyTakeaways",
+    "trackAnalysis",
+    "hotCompanies",
+  ],
+};
 
 async function startServer() {
   const app = express();
@@ -17,29 +61,30 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Helper to lazy-initialize GoogleGenAI
-  const getGeminiClient = () => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY environment variable is required. Please set it in Settings > Secrets.");
+  // Helper to get AI client or respond with error
+  function requireAIClient(res: express.Response) {
+    const client = getAIClient();
+    if (!client) {
+      res.status(503).json({
+        error: "AI 服务未配置。请设置 AI_API_KEY（或 GEMINI_API_KEY）环境变量。",
+        isConfigError: true,
+      });
+      return null;
     }
-    return new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
-      },
-    });
-  };
+    return client;
+  }
 
-  // API Route 1: Generate dynamic AI Investor Report based on the day's 30 news items
+  // API Route 1: Generate dynamic AI Investor Report
   app.get("/api/analyst/report", async (req, res) => {
     try {
-      const ai = getGeminiClient();
+      const client = requireAIClient(res);
+      if (!client) return;
 
-      const prompt = `你是一位顶尖的硬科技赛道（AI大模型、人形机器人、半导体芯片）核心投研合伙人。这里是今日（2026年5月25日）的所有行业投资快讯：
-${JSON.stringify(INITIAL_NEWS, null, 2)}
+      const { items: newsData } = getCachedNews();
+      const activeNews = newsData.length > 0 ? newsData : INITIAL_NEWS;
+
+      const prompt = `你是一位顶尖的硬科技赛道（AI大模型、人形机器人、半导体芯片）核心投研合伙人。这里是今日的所有行业投资快讯：
+${JSON.stringify(activeNews, null, 2)}
 
 请深度阅读并交叉关联上面的行业雷达快讯，输出今日的宏观半导体与 AI/具身智能投资简报。
 请完全遵守下面的 JSON 格式和属性要求输出（输出必须是合法的 JSON 字符串，不做任何多余的包裹，可解析）：
@@ -53,55 +98,18 @@ ${JSON.stringify(INITIAL_NEWS, null, 2)}
   - semiconductor: 半导体先进工艺（如 A16背面供电）、高宽带内存 HBM4 或通用 GPU 核心突破及订单对攻分析评估（60-90字）
 - hotCompanies: 今日最值得投研跟踪的 4 家热门实体公司/股票代码（如 NVDA, TSMC, AAPL, 宇树科技 ），形式为字符串数组。`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              sentimentIndex: {
-                type: Type.INTEGER,
-                description: "Market sentiment rating from 0 (extremely negative/prudent) to 100 (highly bullish/excited).",
-              },
-              marketVibe: {
-                type: Type.STRING,
-                description: "A succinct caption summarizing today's tech market atmosphere.",
-              },
-              keyTakeaways: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "Three profound macroeconomic takeaways or trend signals from today's feeds.",
-              },
-              trackAnalysis: {
-                type: Type.OBJECT,
-                properties: {
-                  ai: { type: Type.STRING },
-                  robot: { type: Type.STRING },
-                  semiconductor: { type: Type.STRING },
-                },
-                required: ["ai", "robot", "semiconductor"],
-              },
-              hotCompanies: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-                description: "List of 4 hot companies receiving the most dynamic structural boosts today.",
-              },
-            },
-            required: ["sentimentIndex", "marketVibe", "keyTakeaways", "trackAnalysis", "hotCompanies"],
-          },
-        },
+      const response = await client.chat({
+        messages: [{ role: "user", content: prompt }],
+        structuredOutput: { schema: REPORT_SCHEMA },
       });
 
-      const responseText = response.text?.trim() || "{}";
-      const parsedData = JSON.parse(responseText);
+      const parsedData = JSON.parse(response.text || "{}");
       res.json(parsedData);
     } catch (error: any) {
       console.error("Failed to generate investment report:", error);
       res.status(500).json({
         error: error.message || "Internal server error generating report.",
-        isConfigError: error.message?.includes("GEMINI_API_KEY"),
+        isConfigError: error.message?.includes("API_KEY"),
       });
     }
   });
@@ -109,55 +117,84 @@ ${JSON.stringify(INITIAL_NEWS, null, 2)}
   // API Route 2: Grounded Q&A Chat Client with AI investment analyst
   app.post("/api/analyst/chat", async (req, res) => {
     try {
-      const ai = getGeminiClient();
+      const client = requireAIClient(res);
+      if (!client) return;
+
       const { message, history = [] } = req.body;
 
       if (!message) {
-        return res.status(400).json({ error: "Missing required 'message' in request body." });
+        return res
+          .status(400)
+          .json({ error: "Missing required 'message' in request body." });
       }
 
-      // We format custom chats seeded by today's events as background knowledge
+      const { items: chatNews } = getCachedNews();
+      const activeChatNews = chatNews.length > 0 ? chatNews : INITIAL_NEWS;
+
       const systemInstruction = `你是一位精通人工智能、人形机器人、半导体芯片三大硬科技赛道的顶尖投资理财基金经理（花名：雷达大师）。你正在为大众及专业机构投资者提供今日最新动态的深度研判解答。
-今天（2026年5月25日）的最新硬科技赛道行业雷达快讯如下（请将其作为最核心的实时事实依据）：
-${JSON.stringify(INITIAL_NEWS, null, 2)}
+今天的最新硬科技赛道行业雷达快讯如下（请将其作为最核心的实时事实依据）：
+${JSON.stringify(activeChatNews, null, 2)}
 
 【回答指南】：
 - 使用友好、极其专业、富有逻辑、有条理且稍带幽默感的基金经理人设。
 - 善于结合今日新闻的数据（如：1000亿美元星际之门，9.9万元 Unitree H1-E，A16 背面供电工艺，12层 HBM4）解答。
-- 给出清晰敏锐的“黄金投资直觉”。
+- 给出清晰敏锐的"黄金投资直觉"。
 - 每次回答必须控制在 150 - 300 字之间（精炼至上，避免废话）。
 - 如果用户提问的内容与今日快讯毫无关系、也不是关于这三个硬科技领域（AI、机器人、半导体），请幽默而温柔地提醒对方，并拉回到今日的主线行情上来。
 - 直接输出 Markdown 文本，结构层次要清晰。`;
 
-      // Structure contents with history
-      const formattedContents = history.map((h: any) => ({
-        role: h.role === "user" ? "user" : "model",
-        parts: [{ text: h.text }],
+      // Build messages from history (unified format)
+      const messages = history.map((h: any) => ({
+        role: h.role === "model" ? "assistant" : h.role,
+        content: h.text || h.content || "",
       }));
 
       // Append current message
-      formattedContents.push({
-        role: "user",
-        parts: [{ text: message }],
+      messages.push({ role: "user", content: message });
+
+      const response = await client.chat({
+        messages,
+        systemInstruction,
+        temperature: 0.7,
       });
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: formattedContents,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-        },
-      });
-
-      const text = response.text || "非常抱歉，雷达信号受到些许电磁波干扰，请您重新发送一次您的投资咨询。";
+      const text =
+        response.text ||
+        "非常抱歉，雷达信号受到些许电磁波干扰，请您重新发送一次您的投资咨询。";
       res.json({ text });
     } catch (error: any) {
       console.error("Failed in analyst chat conversation:", error);
       res.status(500).json({
         error: error.message || "Internal server error in conversation.",
-        isConfigError: error.message?.includes("GEMINI_API_KEY"),
+        isConfigError: error.message?.includes("API_KEY"),
       });
+    }
+  });
+
+  // API Route 3: Get cached news feed (dynamic or fallback)
+  app.get("/api/news", (req, res) => {
+    const { items, isDynamic, lastFetched, error } = getCachedNews();
+    if (items.length > 0) {
+      res.json({ items, count: items.length, isDynamic, lastFetched, error });
+    } else {
+      res.json({
+        items: INITIAL_NEWS,
+        count: INITIAL_NEWS.length,
+        isDynamic: false,
+        lastFetched: null,
+        error: error ?? "RSSHub 数据暂不可用，已切换至离线静态数据",
+      });
+    }
+  });
+
+  // API Route 4: Force refresh news from RSSHub
+  app.post("/api/news/refresh", async (req, res) => {
+    try {
+      await forceRefresh();
+      const { items, isDynamic } = getCachedNews();
+      res.json({ success: true, count: items.length, isDynamic });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
@@ -177,7 +214,11 @@ ${JSON.stringify(INITIAL_NEWS, null, 2)}
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Track Radar Backend] Server listening at http://localhost:${PORT} under NODE_ENV=${process.env.NODE_ENV}`);
+    const provider = process.env.AI_PROVIDER || "gemini";
+    const model = process.env.AI_MODEL || "auto";
+    console.log(
+      `[Track Radar Backend] Server listening at http://localhost:${PORT} (provider=${provider}, model=${model})`
+    );
   });
 }
 

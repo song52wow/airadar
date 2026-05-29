@@ -15,6 +15,10 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const [showCopyBanner, setShowCopyBanner] = useState(false);
+  const [newsItems, setNewsItems] = useState<NewsItem[]>(INITIAL_NEWS);
+  const [newsLoading, setNewsLoading] = useState(true);
+  const [isDynamic, setIsDynamic] = useState(false);
+  const [lastFetched, setLastFetched] = useState<string | null>(null);
 
   // Load localStorage watchlist
   useEffect(() => {
@@ -26,6 +30,33 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
     } catch (e) {
       console.error('Failed reading watchlist from local storage:', e);
     }
+  }, []);
+
+  // Fetch dynamic news feed from backend
+  useEffect(() => {
+    let cancelled = false;
+    async function loadNews() {
+      try {
+        const res = await fetch('/api/news');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) {
+          setNewsItems(data.items || INITIAL_NEWS);
+          setIsDynamic(data.isDynamic ?? false);
+          setLastFetched(data.lastFetched ?? null);
+        }
+      } catch (err) {
+        console.warn('Dynamic news fetch failed, using static data:', err);
+        if (!cancelled) {
+          setNewsItems(INITIAL_NEWS);
+          setIsDynamic(false);
+        }
+      } finally {
+        if (!cancelled) setNewsLoading(false);
+      }
+    }
+    loadNews();
+    return () => { cancelled = true; };
   }, []);
 
   // Save watchlist helper
@@ -65,7 +96,7 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
 
   // Master Filter Pipeline
   const getFilteredNews = (): NewsItem[] => {
-    let result = INITIAL_NEWS;
+    let result = newsItems;
 
     // 1. Tab filter
     if (activeTab === 'watchlist') {
@@ -208,7 +239,21 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
 
       {/* News loop with high-density embedded cards */}
       <div className="flex-grow space-y-3">
-        {renderList.length > 0 ? (
+        {newsLoading ? (
+          <div className="space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="bg-white border border-slate-200/90 rounded p-3 md:p-3.5 animate-pulse">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="h-3 w-12 bg-slate-200 rounded" />
+                  <div className="h-3 w-16 bg-slate-200 rounded" />
+                  <div className="h-3 w-8 bg-slate-200 rounded" />
+                </div>
+                <div className="h-4 w-full bg-slate-200 rounded mb-1" />
+                <div className="h-4 w-3/4 bg-slate-200 rounded" />
+              </div>
+            ))}
+          </div>
+        ) : renderList.length > 0 ? (
           renderList.map((item, index) => {
             // Check if it is an ad
             if ('isAd' in item) {
