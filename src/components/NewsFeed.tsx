@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { INITIAL_NEWS, ADS } from '../data';
 import { NewsItem, AdItem } from '../types';
 import { Search, Star, MessageSquare, ChevronDown, ChevronUp, Tag, Award, Briefcase, TrendingUp, TrendingDown, BookOpen, AlertCircle, Share2, Copy } from 'lucide-react';
@@ -8,10 +9,30 @@ interface NewsFeedProps {
   onSelectKeyword: (kw: string) => void;
   searchFilter: string;
   setSearchFilter: (val: string) => void;
+  initialTab?: 'ai' | 'robot' | 'semiconductor';
 }
 
-export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilter }: NewsFeedProps) {
-  const [activeTab, setActiveTab] = useState<'all' | 'ai' | 'robot' | 'semiconductor' | 'watchlist'>('all');
+export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilter, initialTab }: NewsFeedProps) {
+  const [activeTab, setActiveTab] = useState<'all' | 'ai' | 'robot' | 'semiconductor' | 'watchlist'>(
+    initialTab || 'all'
+  );
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Sync initialTab prop changes (URL navigation)
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  // Sync search params from URL (e.g., /?q=NVDA)
+  useEffect(() => {
+    const q = searchParams.get('q');
+    if (q && setSearchFilter) {
+      setSearchFilter(q);
+    }
+  }, [searchParams, setSearchFilter]);
   const [watchlist, setWatchlist] = useState<string[]>([]);
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const [showCopyBanner, setShowCopyBanner] = useState(false);
@@ -219,7 +240,17 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
           return (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key as any)}
+              onClick={() => {
+                if (tab.key === 'watchlist') {
+                  setActiveTab('watchlist');
+                } else if (tab.key === 'all') {
+                  setActiveTab('all');
+                  navigate('/');
+                } else {
+                  setActiveTab(tab.key as any);
+                  navigate(`/track/${tab.key}`);
+                }
+              }}
               className={`py-1.5 rounded-xs text-[11px] font-bold font-sans tracking-tight transition-all select-none cursor-pointer text-center ${
                 isSelected
                   ? 'bg-white text-slate-800 shadow-xs border-b border-blue-600'
@@ -294,7 +325,7 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
             const hasDetails = !!item.details;
 
             return (
-              <motion.div
+              <motion.article
                 key={item.id}
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -302,7 +333,9 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
                 className={`bg-white border rounded p-3 md:p-3.5 transition-all shadow-2xs relative overflow-hidden group hover:shadow-xs cursor-pointer ${
                   isExpanded ? 'border-slate-350 bg-slate-50/20' : 'border-slate-200/90 hover:border-slate-300'
                 }`}
-                onClick={() => toggleExpanded(item.id)}
+                onClick={() => navigate(`/news/${item.id}`)}
+                itemScope
+                itemType="https://schema.org/NewsArticle"
               >
                 {/* Visual density left accent line */}
                 <span className="absolute top-0 bottom-0 left-0 w-0.5 bg-slate-200 group-hover:bg-blue-600 transition-colors" />
@@ -310,17 +343,17 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
                 {/* News header log row */}
                 <div className="flex items-start justify-between gap-2.5 mb-1.5">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {/* Time indicator */}
-                    <span className="text-[11px] font-mono font-bold text-slate-800 flex items-center gap-0.5">
+                    {/* Time indicator with semantic <time> */}
+                    <time dateTime={`2026-05-30T${item.time}:00+08:00`} className="text-[11px] font-mono font-bold text-slate-800 flex items-center gap-0.5">
                       ⏱️ {item.time}
-                    </span>
+                    </time>
 
                     <span className="text-slate-300 select-none text-[10px]">•</span>
 
-                    {/* Source label */}
-                    <span className="text-[11.5px] font-bold text-slate-500 font-sans">
+                    {/* Source label with citation */}
+                    <cite className="text-[11.5px] font-bold text-slate-500 font-sans not-italic">
                       {item.source}
-                    </span>
+                    </cite>
 
                     <span className="text-slate-300 select-none text-[10px]">•</span>
 
@@ -357,8 +390,8 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
                   </div>
                 </div>
 
-                {/* News Title text */}
-                <h3 className="text-xs font-bold text-slate-800 font-sans leading-relaxed group-hover:text-slate-900 transition-colors pr-1.5 break-words">
+                {/* News Title - semantic heading */}
+                <h3 className="text-xs font-bold text-slate-800 font-sans leading-relaxed group-hover:text-slate-900 transition-colors pr-1.5 break-words" itemProp="headline">
                   {item.summary}
                 </h3>
 
@@ -380,9 +413,9 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
                     <div className="flex items-center gap-1 overflow-hidden truncate max-w-[60%]">
                       <span className="text-[9px] font-mono uppercase tracking-tight text-slate-400">研判跟踪:</span>
                       {item.symbols.map((sym, i) => (
-                        <span key={i} className="text-[9px] font-mono font-bold bg-slate-100 border border-slate-205 text-slate-650 px-1 rounded-xs truncate">
+                        <data key={i} value={sym} className="text-[9px] font-mono font-bold bg-slate-100 border border-slate-205 text-slate-650 px-1 rounded-xs truncate">
                           ${sym}
-                        </span>
+                        </data>
                       ))}
                     </div>
                   )}
@@ -448,7 +481,7 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </motion.div>
+              </motion.article>
             );
           })
         ) : (

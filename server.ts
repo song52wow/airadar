@@ -1,19 +1,28 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { INITIAL_NEWS } from "./src/data";
 import { startPolling, getCachedNews, forceRefresh } from "./server/newsCache";
 import { getAIClient } from "./server/ai/client";
+import { renderSeoContent, renderSsrCss } from "./server/renderer";
 
 dotenv.config();
 
 // Start RSSHub news polling
 startPolling();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Compat: ESM (tsx dev) vs CJS (esbuild production)
+const _filename: string = (() => {
+  try { return fileURLToPath(import.meta.url); } catch { /* CJS fallback */ }
+  try { return __filename as any; } catch { /* ignore */ }
+  return process.cwd();
+})();
+const _dirname = path.dirname(_filename);
+
+const isProduction = process.env.NODE_ENV === "production";
 
 const REPORT_SCHEMA = {
   type: "object",
@@ -54,6 +63,201 @@ const REPORT_SCHEMA = {
     "hotCompanies",
   ],
 };
+
+/**
+ * Generate dynamic SEO meta tags based on the requested URL
+ */
+function generateMetaTags(url: string, newsTitle?: string, reportData?: any): string {
+  const siteName = "赛道雷达 Track Radar";
+  const baseUrl = "https://trackradar.ai";
+  const defaultTitle = "赛道雷达 · Track Radar — AI/机器人/半导体硬科技投资情报";
+  const defaultDesc = "聚焦 AI 大模型、人形机器人、半导体芯片三大硬科技赛道，聚合实时新闻与 AI 投研分析。";
+
+  let title = defaultTitle;
+  let description = defaultDesc;
+  let canonical = `${baseUrl}${url}`;
+  let ogType = "website";
+
+  if (url.startsWith("/track/ai")) {
+    title = "AI 大模型赛道 — 赛道雷达 Track Radar";
+    description = "AI 大模型赛道实时快讯：OpenAI、微软星际之门、DeepSeek、智谱、Kimi 等大模型与算力投资动态。";
+  } else if (url.startsWith("/track/robot")) {
+    title = "人形机器人赛道 — 赛道雷达 Track Radar";
+    description = "人形机器人赛道实时快讯：特斯拉 Optimus、宇树科技、傅利叶 GR-2 等具身智能与人形机器人量产动态。";
+  } else if (url.startsWith("/track/semiconductor")) {
+    title = "半导体芯片赛道 — 赛道雷达 Track Radar";
+    description = "半导体芯片赛道实时快讯：台积电 A16、英伟达 Blackwell、HBM4、先进封装等半导体产业链动态。";
+  } else if (url.startsWith("/news/") && newsTitle) {
+    title = `${newsTitle.slice(0, 60)} — 赛道雷达`;
+    description = newsTitle;
+  } else if (url === "/report") {
+    title = "AI 投研日报 — 赛道雷达 Track Radar";
+    description = reportData?.marketVibe
+      ? `市场情绪指数 ${reportData.sentimentIndex}%，${reportData.marketVibe} — AI 投研合伙人每日简报`
+      : "赛道雷达 AI 投研合伙人每日简报，覆盖 AI 大模型、人形机器人、半导体芯片三大赛道。";
+    ogType = "article";
+  }
+
+  return `
+<title>${title}</title>
+<meta name="description" content="${description}" />
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
+<meta property="og:type" content="${ogType}" />
+<meta property="og:url" content="${canonical}" />
+<meta property="og:title" content="${title}" />
+<meta property="og:description" content="${description}" />
+<meta property="og:site_name" content="${siteName}" />
+<meta property="og:locale" content="zh_CN" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${title}" />
+<meta name="twitter:description" content="${description}" />
+<link rel="canonical" href="${canonical}" />`;
+}
+
+/**
+ * Generate JSON-LD structured data based on URL
+ */
+function generateJsonLd(url: string, initialData: any): string {
+  const baseUrl = "https://trackradar.ai";
+  const scripts: string[] = [];
+
+  // WebSite (for all pages)
+  scripts.push(JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: "赛道雷达 Track Radar",
+    url: baseUrl,
+    description: "实时硬科技投资情报与 AI 投研分析平台",
+    inLanguage: "zh-CN",
+    potentialAction: {
+      "@type": "SearchAction",
+      target: `${baseUrl}/search?q={search_term_string}`,
+      "query-input": "required name=search_term_string",
+    },
+  }));
+
+  // Organization
+  scripts.push(JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "赛道雷达 Track Radar",
+    url: baseUrl,
+    description: "聚焦 AI 大模型、人形机器人、半导体芯片三大硬科技赛道的投资情报平台",
+    knowsAbout: ["AI大模型", "人形机器人", "半导体芯片", "硬科技投资", "科技新闻"],
+  }));
+
+  // BreadcrumbList
+  const breadcrumbItems: any[] = [
+    { "@type": "ListItem", position: 1, name: "首页", item: baseUrl },
+  ];
+
+  if (url.startsWith("/track/")) {
+    const trackMap: Record<string, string> = { ai: "AI 大模型", robot: "人形机器人", semiconductor: "半导体芯片" };
+    const trackId = url.split("/track/")[1];
+    breadcrumbItems.push({
+      "@type": "ListItem",
+      position: 2,
+      name: trackMap[trackId] || trackId,
+      item: `${baseUrl}/track/${trackId}`,
+    });
+  } else if (url === "/report") {
+    breadcrumbItems.push({ "@type": "ListItem", position: 2, name: "AI 投研日报", item: `${baseUrl}/report` });
+  } else if (url.startsWith("/news/")) {
+    const newsId = url.split("/news/")[1];
+    const news = initialData?.news?.items?.find((n: any) => n.id === newsId);
+    breadcrumbItems.push({
+      "@type": "ListItem",
+      position: 2,
+      name: news?.summary?.slice(0, 30) || "快讯详情",
+      item: `${baseUrl}/news/${newsId}`,
+    });
+  }
+
+  scripts.push(JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: breadcrumbItems,
+  }));
+
+  // Page-specific structured data
+  if (url.startsWith("/news/") && initialData?.news) {
+    const newsId = url.split("/news/")[1];
+    const news = initialData.news.items.find((n: any) => n.id === newsId);
+    if (news) {
+      scripts.push(JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "NewsArticle",
+        headline: news.summary,
+        datePublished: `2026-05-30T${news.time}:00+08:00`,
+        author: { "@type": "Organization", name: news.source },
+        publisher: { "@type": "Organization", name: "赛道雷达 Track Radar", url: baseUrl },
+        about: news.keywords.map((kw: string) => ({ "@type": "Thing", name: kw })),
+        articleBody: news.details,
+        keywords: news.keywords.join(", "),
+        mainEntityOfPage: { "@type": "WebPage", "@id": `${baseUrl}/news/${news.id}` },
+      }));
+    }
+  }
+
+  if (url === "/report" && initialData?.report) {
+    scripts.push(JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Article",
+      headline: "赛道雷达 AI 投研日报 — 硬科技投资简报",
+      description: `市场情绪指数 ${initialData.report.sentimentIndex}%，${initialData.report.marketVibe}`,
+      datePublished: new Date().toISOString().split("T")[0],
+      author: { "@type": "Organization", name: "赛道雷达 Track Radar AI" },
+      publisher: { "@type": "Organization", name: "赛道雷达 Track Radar", url: baseUrl },
+      about: [
+        { "@type": "Thing", name: "AI大模型" },
+        { "@type": "Thing", name: "人形机器人" },
+        { "@type": "Thing", name: "半导体芯片" },
+        { "@type": "Thing", name: "硬科技投资" },
+      ],
+      mainEntityOfPage: { "@type": "WebPage", "@id": `${baseUrl}/report` },
+    }));
+  }
+
+  return scripts.map((s) => `<script type="application/ld+json">${s}</script>`).join("\n");
+}
+
+/**
+ * Build the full SEO meta block (title, description, OG, Twitter, canonical, JSON-LD)
+ */
+function buildMetaBlock(url: string, initialData: any): string {
+  const parts: string[] = [];
+
+  // Keywords and author (static)
+  parts.push('<meta name="keywords" content="赛道雷达,Track Radar,AI投资,大模型,人形机器人,半导体,芯片,硬科技,科技新闻,投资情报,AI投研" />');
+  parts.push('<meta name="author" content="Track Radar AI" />');
+
+  // Dynamic route-specific meta
+  parts.push(generateMetaTags(
+    url,
+    initialData?.newsTitle,
+    initialData?.report,
+  ));
+
+  // JSON-LD structured data
+  parts.push(generateJsonLd(url, initialData));
+
+  return parts.join("\n    ");
+}
+
+/**
+ * Build the initial data script tag
+ */
+function buildInitialDataScript(newsItems: any[]): string {
+  const initialData = {
+    news: {
+      items: newsItems,
+      isDynamic: newsItems.length > 0,
+      lastFetched: new Date().toISOString(),
+    },
+    report: null,
+  };
+  return `<script>window.__INITIAL_DATA__ = ${JSON.stringify(initialData)};</script>`;
+}
 
 async function startServer() {
   const app = express();
@@ -198,18 +402,272 @@ ${JSON.stringify(activeChatNews, null, 2)}
     }
   });
 
-  // Serve static files / Vite middleware
-  if (process.env.NODE_ENV !== "production") {
+  // ============================
+  // Sitemap & Robots
+  // ============================
+
+  // Serve robots.txt
+  app.get("/robots.txt", (req, res) => {
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.send(`User-agent: *
+Allow: /
+Disallow: /api/
+
+# AI Crawlers
+User-agent: GPTBot
+Allow: /
+Disallow: /api/
+
+User-agent: Claude-Web
+Allow: /
+Disallow: /api/
+
+User-agent: anthropic-ai
+Allow: /
+Disallow: /api/
+
+User-agent: CCBot
+Allow: /
+Disallow: /api/
+
+User-agent: PerplexityBot
+Allow: /
+Disallow: /api/
+
+User-agent: Google-Extended
+Allow: /
+Disallow: /api/
+
+Sitemap: https://trackradar.ai/sitemap.xml`);
+  });
+
+  // Dynamic sitemap.xml
+  app.get("/sitemap.xml", (req, res) => {
+    const baseUrl = "https://trackradar.ai";
+    const today = new Date().toISOString().split("T")[0];
+
+    // Static routes
+    const staticRoutes = [
+      { loc: "/", priority: "1.0", changefreq: "hourly" },
+      { loc: "/track/ai", priority: "0.9", changefreq: "hourly" },
+      { loc: "/track/robot", priority: "0.9", changefreq: "hourly" },
+      { loc: "/track/semiconductor", priority: "0.9", changefreq: "hourly" },
+      { loc: "/report", priority: "0.8", changefreq: "daily" },
+    ];
+
+    // Dynamic news routes
+    const { items: newsItems } = getCachedNews();
+    const activeNews = newsItems.length > 0 ? newsItems : INITIAL_NEWS;
+    const newsRoutes = activeNews.map((item: any) => ({
+      loc: `/news/${item.id}`,
+      priority: "0.6",
+      changefreq: "daily",
+      lastmod: today,
+    }));
+
+    const allRoutes = [...staticRoutes, ...newsRoutes];
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
+${allRoutes
+  .map(
+    (r) => `  <url>
+    <loc>${baseUrl}${r.loc}</loc>
+    <lastmod>${(r as any).lastmod || today}</lastmod>
+    <changefreq>${r.changefreq}</changefreq>
+    <priority>${r.priority}</priority>
+  </url>`,
+  )
+  .join("\n")}
+</urlset>`;
+
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.send(xml);
+  });
+
+  // ============================
+  // SSR Rendering Middleware
+  // ============================
+
+  // Simple in-memory cache for SSR output (TTL: 5 minutes, matches news polling interval)
+  const ssrCache = new Map<string, { html: string; timestamp: number }>();
+  const SSR_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+  function getCachedSSR(url: string): string | null {
+    const cached = ssrCache.get(url);
+    if (cached && Date.now() - cached.timestamp < SSR_CACHE_TTL) {
+      return cached.html;
+    }
+    if (cached) {
+      ssrCache.delete(url);
+    }
+    return null;
+  }
+
+  function setCachedSSR(url: string, html: string): void {
+    ssrCache.set(url, { html, timestamp: Date.now() });
+  }
+
+  if (isProduction) {
+    // Production: Serve static assets (JS, CSS, etc.) but NOT index.html
+    const distClientPath = path.join(process.cwd(), "dist", "client");
+    app.use(
+      express.static(distClientPath, {
+        index: false, // Don't serve index.html automatically — SSR handles it
+      }),
+    );
+
+    // SSR fallback: For all non-API routes, serve index.html (SPA mode with client-side routing)
+    // In production, we use the built client assets
+    const indexHtml = fs.readFileSync(
+      path.join(distClientPath, "index.html"),
+      "utf-8"
+    );
+
+    app.get("*", (req, res) => {
+      if (req.path.startsWith("/api/")) return; // Skip API routes (handled above)
+
+      const cacheKey = req.path;
+      const cached = getCachedSSR(cacheKey);
+      if (cached) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("X-SSR-Cache", "HIT");
+        return res.send(cached);
+      }
+
+      try {
+        // Pre-fetch data for SSR
+        const { items: newsItems } = getCachedNews();
+        const activeNews = newsItems.length > 0 ? newsItems : INITIAL_NEWS;
+
+        // Determine route type
+        let trackFilter: 'ai' | 'robot' | 'semiconductor' | undefined;
+        let newsIdFilter: string | undefined;
+        if (req.path.startsWith('/track/ai')) trackFilter = 'ai';
+        else if (req.path.startsWith('/track/robot')) trackFilter = 'robot';
+        else if (req.path.startsWith('/track/semiconductor')) trackFilter = 'semiconductor';
+        else if (req.path.startsWith('/news/')) newsIdFilter = req.path.split('/news/')[1];
+
+        // Get news title for meta tags
+        let newsTitle: string | undefined;
+        if (newsIdFilter) {
+          const found = activeNews.find((n: any) => n.id === newsIdFilter);
+          if (found) newsTitle = found.summary;
+        }
+
+        // Generate SEO pre-rendered HTML content (visible to all crawlers)
+        const seoHtml = renderSeoContent(activeNews, {
+          url: req.path,
+          trackFilter,
+          newsIdFilter,
+        });
+        const seoCss = renderSsrCss();
+
+        const initialData = { newsTitle, news: { items: activeNews }, report: null };
+        const metaBlock = buildMetaBlock(req.path, initialData);
+        const dataScript = buildInitialDataScript(activeNews);
+
+        // Replace placeholders in the built index.html
+        let html = indexHtml
+          .replace('<!-- META_PLACEHOLDER -->', metaBlock)
+          .replace(
+            '<!-- SSR_PLACEHOLDER -->',
+            `<style>${seoCss}</style>\n${seoHtml}`,
+          )
+          .replace('<!-- INITIAL_DATA_PLACEHOLDER -->', dataScript);
+
+        setCachedSSR(cacheKey, html);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("X-SSR-Cache", "MISS");
+        res.send(html);
+      } catch (err) {
+        console.error("SSR render error:", err);
+        res.sendFile(path.join(distClientPath, "index.html"));
+      }
+    });
+  } else {
+    // Development: Use Vite middleware + SSR for all routes
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "custom",
     });
     app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+
+    // SSR handler for all non-API routes in dev mode
+    app.get("*", async (req, res, next) => {
+      if (req.path.startsWith("/api/")) return next();
+
+      const url = req.originalUrl;
+
+      try {
+        // Read and transform the index.html template
+        let template = fs.readFileSync(
+          path.join(process.cwd(), "index.html"),
+          "utf-8"
+        );
+        template = await vite.transformIndexHtml(url, template);
+
+        // Pre-fetch data for SSR
+        const { items: newsItems } = getCachedNews();
+        const activeNews = newsItems.length > 0 ? newsItems : INITIAL_NEWS;
+
+        // Determine route type
+        let trackFilter: 'ai' | 'robot' | 'semiconductor' | undefined;
+        let newsIdFilter: string | undefined;
+        if (url.startsWith('/track/ai')) trackFilter = 'ai';
+        else if (url.startsWith('/track/robot')) trackFilter = 'robot';
+        else if (url.startsWith('/track/semiconductor')) trackFilter = 'semiconductor';
+        else if (url.startsWith('/news/')) newsIdFilter = url.split('/news/')[1];
+
+        // Get news title for meta tags
+        let newsTitle: string | undefined;
+        if (newsIdFilter) {
+          const found = activeNews.find((n: any) => n.id === newsIdFilter);
+          if (found) newsTitle = found.summary;
+        }
+
+        // Generate SEO pre-rendered HTML content (visible to all crawlers)
+        const seoHtml = renderSeoContent(activeNews, {
+          url,
+          trackFilter,
+          newsIdFilter,
+        });
+        const seoCss = renderSsrCss();
+
+        const initialData = { newsTitle, news: { items: activeNews }, report: null };
+        const metaBlock = buildMetaBlock(url, initialData);
+        const dataScript = buildInitialDataScript(activeNews);
+
+        // Replace placeholders
+        const html = template
+          .replace('<!-- META_PLACEHOLDER -->', metaBlock)
+          .replace(
+            '<!-- SSR_PLACEHOLDER -->',
+            `<style>${seoCss}</style>\n${seoHtml}`,
+          )
+          .replace('<!-- INITIAL_DATA_PLACEHOLDER -->', dataScript);
+
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.send(html);
+      } catch (err: any) {
+        // If everything fails, fall back to SPA mode
+        if (!res.headersSent) {
+          vite.ssrFixStacktrace(err);
+          console.error("SSR dev error:", err.message);
+          try {
+            const template = await vite.transformIndexHtml(
+              url,
+              fs.readFileSync(path.join(process.cwd(), "index.html"), "utf-8"),
+            );
+            const fallbackMeta = buildMetaBlock(url, {});
+            const html = template.replace("<!-- META_PLACEHOLDER -->", fallbackMeta);
+            res.status(200).setHeader("Content-Type", "text/html; charset=utf-8").send(html);
+          } catch {
+            next(err);
+          }
+        }
+      }
     });
   }
 
@@ -217,7 +675,7 @@ ${JSON.stringify(activeChatNews, null, 2)}
     const provider = process.env.AI_PROVIDER || "gemini";
     const model = process.env.AI_MODEL || "auto";
     console.log(
-      `[Track Radar Backend] Server listening at http://localhost:${PORT} (provider=${provider}, model=${model})`
+      `[Track Radar Backend] Server listening at http://localhost:${PORT} (provider=${provider}, model=${model}, mode=${isProduction ? "production" : "development"})`
     );
   });
 }
