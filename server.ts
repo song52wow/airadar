@@ -313,7 +313,15 @@ ${JSON.stringify(activeNews, null, 2)}
       });
 
       const parsedData = JSON.parse(response.text || "{}");
-      res.json(parsedData);
+      // Echo the active provider/model so the client can label the "实时分析成功" banner
+      // with the real model name (instead of a hardcoded one).
+      res.json({
+        ...parsedData,
+        _meta: {
+          provider: process.env.AI_PROVIDER || "gemini",
+          model: process.env.AI_MODEL || null,
+        },
+      });
     } catch (error: any) {
       log.error("Failed to generate investment report:", error);
       res.status(500).json({

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, RefreshCw, AlertCircle, TrendingUp, HelpCircle, CheckCircle2 } from 'lucide-react';
 import { createLogger } from '../utils/logger';
+import { formatModelLabel, apiKeyEnvName } from '../utils/aiProvider';
 
 const log = createLogger('AIReportCard');
 
@@ -15,6 +16,7 @@ interface ReportData {
     semiconductor: string;
   };
   hotCompanies: string[];
+  _meta?: { provider: string; model: string | null };
 }
 
 const BACKUP_REPORT: ReportData = {
@@ -48,9 +50,9 @@ export default function AIReportCard() {
       if (!res.ok) {
         throw new Error(`API returned status ${res.status}`);
       }
-      const data = await res.json();
-      if (data.error) {
-        throw new Error(data.error);
+      const data: ReportData = await res.json();
+      if ((data as any).error) {
+        throw new Error((data as any).error);
       }
       setReport(data);
       setIsAiGenerated(true);
@@ -58,7 +60,7 @@ export default function AIReportCard() {
     } catch (err: any) {
       log.warn('Backend server API failed. Using hyper-polished offline/built-in investment report:', err);
       // Determine if key is missing error
-      if (err.message?.includes('GEMINI_API_KEY') || err.message?.includes('500') || err.message?.includes('400')) {
+      if (err.message?.includes('API_KEY') || err.message?.includes('500') || err.message?.includes('400')) {
         setIsKeyMissing(true);
       } else {
         setErrorMessage(err.message || '网络连接异常，已自动为您载入今日预存核心投研简报');
@@ -130,7 +132,7 @@ export default function AIReportCard() {
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold block text-[11px]">使用今日预存特制投研总结（離線/内测模式）</span>
-                未配置 <code className="bg-amber-100 px-1 py-0.2 rounded font-mono text-[9px]">GEMINI_API_KEY</code> 环境变量。您可随时点击右上角<b>「Settings &gt; Secrets」</b>添加密钥，开启 100% 动态实时大模型快讯精算。
+                未配置 <code className="bg-amber-100 px-1 py-0.2 rounded font-mono text-[9px]">{apiKeyEnvName('gemini')}</code> 环境变量（<code className="bg-amber-100 px-1 py-0.2 rounded font-mono text-[9px]">GEMINI_API_KEY</code> 为兼容旧配置的回退项）。您可随时点击右上角<b>「Settings &gt; Secrets」</b>添加密钥，开启 100% 动态实时大模型快讯精算。
               </div>
             </div>
           )}
@@ -145,7 +147,7 @@ export default function AIReportCard() {
           {isAiGenerated && !isKeyMissing && (
             <div className="mb-4 p-2 rounded-lg bg-green-50 border border-green-200/50 text-green-800 text-[10px] flex items-center gap-1.5 justify-center">
               <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
-              <span><b>实时分析成功</b>：简报已由 Gemini-3.5-flash 根据今日实时快讯流自动演进精算生成</span>
+              <span><b>实时分析成功</b>：简报已由 {formatModelLabel(report._meta?.provider ?? 'gemini', report._meta?.model)} 根据今日实时快讯流自动演进精算生成</span>
             </div>
           )}
 

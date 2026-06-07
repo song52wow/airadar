@@ -74,7 +74,7 @@ export default function AIAssistant() {
       setMessages(prev => [...prev, { role: 'model', text: data.text }]);
       setIsKeyMissing(false);
     } catch (err: any) {
-      log.warn('Live Gemini endpoint error, activating local high-fidelity simulator:', err);
+      log.warn('Live AI endpoint error, activating local high-fidelity simulator:', err);
 
       // Check key missing flag
       if (err.message?.includes('GEMINI_API_KEY') || err.message?.includes('500') || err.message?.includes('400')) {
