@@ -1,6 +1,9 @@
 import type { AIClient } from "./types";
 import { createGeminiClient } from "./backends/gemini";
 import { createOpenAICompatClient } from "./backends/openai-compat";
+import { createLogger } from "../logger";
+
+const log = createLogger("ai/client");
 
 let cachedClient: AIClient | null = null;
 
@@ -16,7 +19,7 @@ export function getAIClient(): AIClient | null {
   if (provider === "openai-compat") {
     const baseUrl = process.env.AI_BASE_URL;
     if (!baseUrl) {
-      console.warn("[ai/client] AI_BASE_URL required for openai-compat provider");
+      log.warn("AI_BASE_URL required for openai-compat provider");
       return null;
     }
     cachedClient = createOpenAICompatClient({ apiKey, baseUrl, model });
@@ -25,6 +28,6 @@ export function getAIClient(): AIClient | null {
     cachedClient = createGeminiClient({ apiKey, model });
   }
 
-  console.log(`[ai/client] Using provider=${provider} model=${model || "auto"}`);
+  log.info(`Using provider=${provider} model=${model || "auto"}`);
   return cachedClient;
 }

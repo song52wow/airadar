@@ -8,6 +8,10 @@ import { INITIAL_NEWS } from "./src/data";
 import { startPolling, getCachedNews, forceRefresh } from "./server/newsCache";
 import { getAIClient } from "./server/ai/client";
 import { renderSeoContent, renderSsrCss } from "./server/renderer";
+import { createLogger } from "./server/logger";
+import { requestLogger } from "./server/requestLogger";
+
+const log = createLogger("server");
 
 dotenv.config();
 
@@ -264,6 +268,7 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(requestLogger());
 
   // Helper to get AI client or respond with error
   function requireAIClient(res: express.Response) {
@@ -310,7 +315,7 @@ ${JSON.stringify(activeNews, null, 2)}
       const parsedData = JSON.parse(response.text || "{}");
       res.json(parsedData);
     } catch (error: any) {
-      console.error("Failed to generate investment report:", error);
+      log.error("Failed to generate investment report:", error);
       res.status(500).json({
         error: error.message || "Internal server error generating report.",
         isConfigError: error.message?.includes("API_KEY"),
@@ -367,7 +372,7 @@ ${JSON.stringify(activeChatNews, null, 2)}
         "非常抱歉，雷达信号受到些许电磁波干扰，请您重新发送一次您的投资咨询。";
       res.json({ text });
     } catch (error: any) {
-      console.error("Failed in analyst chat conversation:", error);
+      log.error("Failed in analyst chat conversation:", error);
       res.status(500).json({
         error: error.message || "Internal server error in conversation.",
         isConfigError: error.message?.includes("API_KEY"),
@@ -582,7 +587,7 @@ ${allRoutes
         res.setHeader("X-SSR-Cache", "MISS");
         res.send(html);
       } catch (err) {
-        console.error("SSR render error:", err);
+        log.error("SSR render error:", err);
         res.sendFile(path.join(distClientPath, "index.html"));
       }
     });
@@ -654,7 +659,7 @@ ${allRoutes
         // If everything fails, fall back to SPA mode
         if (!res.headersSent) {
           vite.ssrFixStacktrace(err);
-          console.error("SSR dev error:", err.message);
+          log.error("SSR dev error:", err.message);
           try {
             const template = await vite.transformIndexHtml(
               url,
@@ -674,8 +679,8 @@ ${allRoutes
   app.listen(PORT, "0.0.0.0", () => {
     const provider = process.env.AI_PROVIDER || "gemini";
     const model = process.env.AI_MODEL || "auto";
-    console.log(
-      `[Track Radar Backend] Server listening at http://localhost:${PORT} (provider=${provider}, model=${model}, mode=${isProduction ? "production" : "development"})`
+    log.info(
+      `Server listening at http://localhost:${PORT} (provider=${provider}, model=${model}, mode=${isProduction ? "production" : "development"})`
     );
   });
 }

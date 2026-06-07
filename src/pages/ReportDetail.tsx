@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowLeft, Sparkles, TrendingUp } from 'lucide-react';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('ReportDetail');
 
 interface ReportData {
   sentimentIndex: number;
@@ -29,7 +32,7 @@ export default function ReportDetail() {
           if (!cancelled) setReport(data);
         }
       } catch (err) {
-        console.warn('Failed to load report:', err);
+        log.warn('Failed to load report:', err);
       } finally {
         if (!cancelled) setLoading(false);
       }

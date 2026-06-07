@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bot, Send, Sparkles, RefreshCw, AlertCircle, HelpCircle, CheckCircle, BookOpen, Clock } from 'lucide-react';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('AIAssistant');
 
 interface ChatMessage {
   role: 'user' | 'model';
@@ -71,7 +74,7 @@ export default function AIAssistant() {
       setMessages(prev => [...prev, { role: 'model', text: data.text }]);
       setIsKeyMissing(false);
     } catch (err: any) {
-      console.warn('Live Gemini endpoint error, activating local high-fidelity simulator:', err);
+      log.warn('Live Gemini endpoint error, activating local high-fidelity simulator:', err);
 
       // Check key missing flag
       if (err.message?.includes('GEMINI_API_KEY') || err.message?.includes('500') || err.message?.includes('400')) {

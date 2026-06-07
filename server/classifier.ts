@@ -1,6 +1,11 @@
 import type { NewsItem } from "../src/types";
 import type { RawRssItem } from "./rssFetcher";
 import type { AIClient } from "./ai/types";
+import { createLogger } from "./logger";
+
+const log = createLogger("classifier");
+const aiLog = log.child("ai");
+const kwLog = log.child("keyword");
 
 const BATCH_SIZE = 8;
 
@@ -87,8 +92,8 @@ function classifyByKeyword(rawItems: RawRssItem[]): NewsItem[] {
     });
   }
 
-  console.log(
-    `[classifier:keyword] Classified ${results.length}/${rawItems.length} items (no AI)`
+  kwLog.info(
+    `Classified ${results.length}/${rawItems.length} items (no AI)`
   );
   return results;
 }
@@ -187,12 +192,12 @@ async function classifyWithAI(
         });
       }
     } catch (err: any) {
-      console.warn("[classifier:ai] Batch classification failed:", err.message);
+      aiLog.warn("Batch classification failed:", err.message);
     }
   }
 
-  console.log(
-    `[classifier:ai] Classified ${results.length}/${rawItems.length} items`
+  aiLog.info(
+    `Classified ${results.length}/${rawItems.length} items`
   );
 
   return results;
@@ -210,7 +215,7 @@ export async function classifyItems(
     try {
       return await classifyWithAI(rawItems, ai);
     } catch (err: any) {
-      console.warn("[classifier] AI classification failed, falling back to keyword:", err.message);
+      log.warn("AI classification failed, falling back to keyword:", err.message);
     }
   }
 

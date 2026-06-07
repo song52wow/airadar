@@ -4,6 +4,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { INITIAL_NEWS, ADS } from '../data';
 import { NewsItem, AdItem } from '../types';
 import { Search, Star, MessageSquare, ChevronDown, ChevronUp, Tag, Award, Briefcase, TrendingUp, TrendingDown, BookOpen, AlertCircle, Share2, Copy } from 'lucide-react';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('NewsFeed');
 
 interface NewsFeedProps {
   onSelectKeyword: (kw: string) => void;
@@ -49,7 +52,7 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
         setWatchlist(JSON.parse(stored));
       }
     } catch (e) {
-      console.error('Failed reading watchlist from local storage:', e);
+      log.error('Failed reading watchlist from local storage:', e);
     }
   }, []);
 
@@ -67,7 +70,7 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
           setLastFetched(data.lastFetched ?? null);
         }
       } catch (err) {
-        console.warn('Dynamic news fetch failed, using static data:', err);
+        log.warn('Dynamic news fetch failed, using static data:', err);
         if (!cancelled) {
           setNewsItems(INITIAL_NEWS);
           setIsDynamic(false);
@@ -93,7 +96,7 @@ export default function NewsFeed({ onSelectKeyword, searchFilter, setSearchFilte
     try {
       localStorage.setItem('radar_watchlist', JSON.stringify(updated));
     } catch (err) {
-      console.error('Failed saving watchlist:', err);
+      log.error('Failed saving watchlist:', err);
     }
   };
 

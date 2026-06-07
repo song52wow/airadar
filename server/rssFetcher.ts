@@ -1,4 +1,7 @@
 import { RSSHUB_URL, RSS_SOURCES, MAX_CACHE_ITEMS } from "./config";
+import { createLogger } from "./logger";
+
+const log = createLogger("rssFetcher");
 
 export interface RawRssItem {
   title: string;
@@ -78,7 +81,7 @@ export async function fetchAllSources(
       }
     } catch (err: any) {
       errors.push(`${source.label}: ${err.message}`);
-      console.warn(`[rssFetcher] Failed to fetch ${source.label}:`, err.message);
+      log.warn(`Failed to fetch ${source.label}:`, err.message);
     }
   }
 
@@ -88,14 +91,14 @@ export async function fetchAllSources(
   );
 
   if (errors.length > 0) {
-    console.warn(
-      `[rssFetcher] ${errors.length}/${RSS_SOURCES.length} sources failed`,
+    log.warn(
+      `${errors.length}/${RSS_SOURCES.length} sources failed`,
       errors
     );
   }
 
-  console.log(
-    `[rssFetcher] Fetched ${results.length} new items from ${RSS_SOURCES.length} sources`
+  log.info(
+    `Fetched ${results.length} new items from ${RSS_SOURCES.length} sources`
   );
 
   return results.slice(0, MAX_CACHE_ITEMS);

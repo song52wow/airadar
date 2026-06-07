@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, RefreshCw, AlertCircle, TrendingUp, HelpCircle, CheckCircle2 } from 'lucide-react';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('AIReportCard');
 
 interface ReportData {
   sentimentIndex: number;
@@ -53,7 +56,7 @@ export default function AIReportCard() {
       setIsAiGenerated(true);
       setIsKeyMissing(false);
     } catch (err: any) {
-      console.warn('Backend server API failed. Using hyper-polished offline/built-in investment report:', err);
+      log.warn('Backend server API failed. Using hyper-polished offline/built-in investment report:', err);
       // Determine if key is missing error
       if (err.message?.includes('GEMINI_API_KEY') || err.message?.includes('500') || err.message?.includes('400')) {
         setIsKeyMissing(true);

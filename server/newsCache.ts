@@ -2,7 +2,10 @@ import { fetchAllSources } from "./rssFetcher";
 import { classifyItems } from "./classifier";
 import { getAIClient } from "./ai/client";
 import { POLL_INTERVAL_MS, MAX_CACHE_ITEMS } from "./config";
+import { createLogger } from "./logger";
 import type { NewsItem } from "../src/types";
+
+const log = createLogger("newsCache");
 
 interface CachedState {
   items: NewsItem[];
@@ -26,7 +29,7 @@ async function pollOnce(): Promise<void> {
   isPolling = true;
 
   try {
-    console.log("[newsCache] Polling RSSHub...");
+    log.info("Polling RSSHub...");
 
     const existingGuids = state.items.map((item) => ({
       guid: item.id.replace("rss-", ""),
@@ -36,7 +39,7 @@ async function pollOnce(): Promise<void> {
     const rawItems = await fetchAllSources(existingGuids);
 
     if (rawItems.length === 0) {
-      console.log("[newsCache] No new items from RSSHub");
+      log.info("No new items from RSSHub");
       state.error = null;
       state.lastFetched = new Date().toISOString();
       return;
@@ -52,17 +55,17 @@ async function pollOnce(): Promise<void> {
       state.items = [...uniqueNew, ...state.items].slice(0, MAX_CACHE_ITEMS);
       state.isDynamic = true;
       const mode = ai ? "AI" : "keyword";
-      console.log(
-        `[newsCache] Added ${uniqueNew.length} new items via ${mode} (total cache: ${state.items.length})`
+      log.info(
+        `Added ${uniqueNew.length} new items via ${mode} (total cache: ${state.items.length})`
       );
     } else {
-      console.log("[newsCache] No items classified from this batch");
+      log.info("No items classified from this batch");
     }
 
     state.error = null;
     state.lastFetched = new Date().toISOString();
   } catch (err: any) {
-    console.error("[newsCache] Poll cycle failed:", err.message);
+    log.error("Poll cycle failed:", err.message);
     state.error = err.message;
   } finally {
     isPolling = false;
@@ -72,7 +75,7 @@ async function pollOnce(): Promise<void> {
 export function startPolling(): void {
   pollOnce();
   pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
-  console.log(`[newsCache] Polling every ${POLL_INTERVAL_MS / 1000}s`);
+  log.info(`Polling every ${POLL_INTERVAL_MS / 1000}s`);
 }
 
 export function stopPolling(): void {
